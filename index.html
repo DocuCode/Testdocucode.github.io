@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+        }
+    </style>
+    <title>Jeu JavaScript avec Firebase - Multi-joueurs</title>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <script src="https://www.gstatic.com/firebasejs/7.24.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/7.24.0/firebase-database.js"></script>
+    <script>
+        // Configuration Firebase
+        var firebaseConfig = {
+            apiKey: "AIzaSyAxny9cbrbeyzbOTmSO74T5MGrtwX1kN5Y",
+            authDomain: "potatopixel-ecef2.firebaseapp.com",
+            databaseURL: "https://potatopixel-ecef2-default-rtdb.firebaseio.com",
+            projectId: "potatopixel-ecef2",
+            storageBucket: "potatopixel-ecef2.appspot.com",
+            messagingSenderId: "76993631189",
+            appId: "1:76993631189:web:8aa9266cb9e06b506de35c",
+            measurementId: "G-Q56SXRKBMN"
+        };
+        firebase.initializeApp(firebaseConfig);
+
+        // Obtient la référence du canvas et son contexte
+        var canvas = document.getElementById("gameCanvas");
+        var ctx = canvas.getContext("2d");
+
+        // Définit la taille du canvas
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // Fonction pour générer une couleur RGB aléatoire
+        function getRandomColor() {
+            var letters = '0123456789ABCDEF';
+            var color = '#';
+            for (var i = 0; i < 6; i++) {
+                color += letters[Math.floor(Math.random() * 16)];
+            }
+            return color;
+        }
+
+        // Définit les propriétés du joueur
+        var player = {
+            id: generatePlayerId(), // Fonction pour générer un identifiant unique
+            x: canvas.width / 2,
+            y: canvas.height / 2,
+            targetX: canvas.width / 2,
+            targetY: canvas.height / 2,
+            speed: 5,
+            color: getRandomColor() // Attribue une couleur aléatoire au joueur
+        };
+
+        // Références Firebase
+        var database = firebase.database();
+        var playersRef = database.ref("players");
+
+        // Ajoute le joueur à la base de données
+        playersRef.child(player.id).set({
+            x: player.x,
+            y: player.y,
+            targetX: player.targetX,
+            targetY: player.targetY,
+            color: player.color
+        });
+
+        // Supprime le joueur de la base de données lors de la fermeture de la fenêtre
+        document.addEventListener("visibilitychange", function() {
+            if (document.visibilityState === "hidden") {
+                playersRef.child(player.id).remove();
+            }
+        });
+
+        // Fonction pour dessiner un joueur
+        function drawPlayer(player) {
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, 20, 0, Math.PI * 2);
+            ctx.fillStyle = player.color;
+            ctx.fill();
+            ctx.strokeStyle = 'black'; // Couleur de la bordure
+            ctx.lineWidth = 2; // Largeur de la bordure
+            ctx.stroke();
+            ctx.closePath();
+        }
+
+        // Fonction pour mettre à jour le jeu
+        function update() {
+            // Utilise un écouteur de valeur pour mettre à jour les positions des joueurs en temps réel
+            playersRef.on("value", function(snapshot) {
+                snapshot.forEach(function(childSnapshot) {
+                    var playerId = childSnapshot.key;
+                    var playerData = childSnapshot.val();
+
+                    // Met à jour la position du joueur actuel (sauf le joueur local)
+                    if (playerId !== player.id) {
+                        var remotePlayer = {
+                            id: playerId,
+                            x: playerData.x,
+                            y: playerData.y,
+                            targetX: playerData.targetX,
+                            targetY: playerData.targetY,
+                            color: playerData.color
+                        };
+
+                        // Calcul de la différence entre la position actuelle et la cible
+                        var dx = remotePlayer.targetX - remotePlayer.x;
+                        var dy = remotePlayer.targetY - remotePlayer.y;
+
+                        // Interpolation linéaire
+                        remotePlayer.x += dx * 0.1;
+                        remotePlayer.y += dy * 0.1;
+
+                        // Dessine le joueur à sa nouvelle position
+                        drawPlayer(remotePlayer);
+                    }
+                });
+            });
+
+            // Calcul de la différence entre la position actuelle et la cible (pour le joueur local)
+            var dx = player.targetX - player.x;
+            var dy = player.targetY - player.y;
+
+            // Interpolation linéaire
+            player.x += dx * 0.1;
+            player.y += dy * 0.1;
+
+            // Met à jour la position du joueur dans la base de données
+            playersRef.child(player.id).update({
+                x: player.x,
+                y: player.y,
+                targetX: player.targetX,
+                targetY: player.targetY
+            });
+        }
+
+        // Fonction de rendu du jeu
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // Efface le canvas
+
+            // Dessine tous les joueurs
+            playersRef.once("value", function(snapshot) {
+                snapshot.forEach(function(childSnapshot) {
+                    var playerData = childSnapshot.val();
+                    drawPlayer({
+                        x: playerData.x,
+                        y: playerData.y,
+                        color: playerData.color
+                    });
+                });
+            });
+
+            requestAnimationFrame(draw); // Appelle la fonction draw à la prochaine frame
+        }
+
+        // Gestion du toucher ou du clic de la souris
+        function handleInput(e) {
+            // Met à jour la nouvelle position du joueur dans la base de données
+            player.targetX = e.clientX || e.touches[0].clientX;
+            player.targetY = e.clientY || e.touches[0].clientY;
+        }
+
+        // Écoute les événements de toucher ou de clic de la souris
+        canvas.addEventListener("mousedown", handleInput);
+        canvas.addEventListener("touchstart", handleInput);
+
+        // Appelle la fonction update et draw en continu
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Lance la boucle de jeu
+        gameLoop();
+
+        // Fonction pour générer un identifiant unique du joueur
+        function generatePlayerId() {
+            return 'player_' + Math.random().toString(36).substr(2, 9);
+        }
+    </script>
+</body>
+</html>
